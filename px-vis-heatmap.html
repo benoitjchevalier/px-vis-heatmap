@@ -3,12 +3,15 @@
 <link rel="import" href="../px-vis/px-vis-scale.html">
 <link rel="import" href="../px-vis/px-vis-svg-canvas.html">
 <link rel="import" href="../px-vis/px-vis-axis.html">
+<link rel="import" href="../px-vis/px-vis-cell-canvas.html">
+<link rel="import" href="../px-vis/px-vis-gridlines.html">
 <link rel="import" href="../px-tooltip/px-tooltip.html">
 
 <link rel="import" href="../px-vis/px-vis-behavior-colors.html">
 <link rel="import" href="../px-vis/px-vis-behavior-common.html">
 <link rel="import" href="../px-vis/px-vis-behavior-chart.html">
 <link rel="import" href="../px-vis/px-vis-behavior-d3.html">
+<link rel="import" href="../px-vis/px-vis-behavior-renderer.html">
 
 <link rel="import" href="px-vis-heatmap-cell.html">
 <link rel="import" href="px-vis-heatmap-legend.html">
@@ -131,6 +134,39 @@
         domain-changed="[[domainChanged]]">
       </px-vis-axis>
       <!-- heatmap cells -->
+      <px-vis-cell-canvas
+        clip-path
+        complete-series-config="[[completeSeriesConfig]]"
+        chart-data="[[chartData]]"
+        canvas-context="[[canvasContext]]"
+        x="[[x]]"
+        y="[[y]]"
+        width="[[_internalWidth]]"
+        height="[[_internalHeight]]"
+        margin="[[_internalMargin]]"
+        color-scale="[[_colorScale]]"
+        series-id="[[seriesKey]]"
+        show-cell-value="[[showCellValue]]"
+        >
+      </px-vis-cell-canvas>
+      <px-vis-gridlines
+        svg="[[svg]]"
+        axis="[[x]]"
+        margin="[[_internalMargin]]"
+        length="[[_internalHeight]]"
+        orientation="bottom"
+        domain-changed="[[domainChanged]]"
+        offset="[[_gridTranslationX]]">
+      </px-vis-gridlines>
+      <px-vis-gridlines
+        svg="[[svg]]"
+        axis="[[y]]"
+        margin="[[_internalMargin]]"
+        length="[[_internalWidth]]"
+        orientation="left"
+        domain-changed="[[domainChanged]]"
+        offset="[[_gridTranslationY]]">
+      </px-vis-gridlines>
       <!-- to use svg, remove canvas-context and add svg="[[svg]]" -->
       <!-- <template is="dom-repeat" items="[[chartData]]">
         <px-vis-heatmap-cell restamp
@@ -232,7 +268,8 @@
         PxVisBehaviorChart.saveImage,
         PxVisBehaviorChart.subConfiguration,
         PxVisBehaviorD3.canvasContext,
-        PxVisBehaviorD3.svgLower
+        PxVisBehaviorD3.svgLower,
+        PxVisBehaviorRenderer.base
       ],
 
       properties: {
@@ -497,12 +534,23 @@
         _legendGapSize: {
           type: Number,
           value: 10
+        },
+
+        _gridTranslationX: {
+          type: Array,
+          computed: '_computeGridTranslationX(domainChanged)'
+        },
+
+        _gridTranslationY: {
+          type: Array,
+          computed: '_computeGridTranslationY(domainChanged)'
         }
 
       },
 
       observers: [
-        '_drawCells(_internalMargin.*, chartData.*, showCellValue, x, y, domainChanged, completeSeriesConfig, seriesKey, _colorScale, _stylesResolved)',
+
+        '_renderChartData(domainChanged, canvasContext, chartData.*, mutedSeries.*, completeSeriesConfig.*, seriesKey, _colorScale, _stylesResolved, _internalMargin)',
         '_updateDataExtents(chartData, chartData.*, paddingOuter)',
         '_updateSeriesConfig(seriesConfig)',
         '_updateSeriesConfig(_colorsAreSet)',
@@ -663,20 +711,19 @@
       },
 
       _updateSeriesConfig: function() {
-        this.debounce('_updateSeriesConfig', function() {
-          // if app doesn't supply seriesConfig, use our default
-          const seriesConfig = this.seriesConfig || {
-            'series1': {
-              'name': 'Series 1',
-              'x': 'x',
-              'y': 'y',
-              'value': 'value'
-            }
-          };
-          // because we only expect a single series, find the first key and assume thats the series key
-          this.set('seriesKey', Object.keys(seriesConfig)[0]);
-          this.set('completeSeriesConfig', seriesConfig);
-        }, 10);
+
+        // if app doesn't supply seriesConfig, use our default
+        const seriesConfig = this.seriesConfig || {
+          'series1': {
+            'name': 'Series 1',
+            'x': 'x',
+            'y': 'y',
+            'value': 'value'
+          }
+        };
+        // because we only expect a single series, find the first key and assume thats the series key
+        this.set('seriesKey', Object.keys(seriesConfig)[0]);
+        this.set('completeSeriesConfig', seriesConfig);
       },
 
       _updateSeriesKey: function() {
@@ -1020,6 +1067,18 @@
 
       _colorsSet: function() {
         this.set('_colorsAreSet', true);
+      },
+
+      _computeGridTranslationX: function() {
+        if(this.domainChanged) {
+          return [this.x.bandwidth()/2, 0];
+        }
+      },
+
+      _computeGridTranslationY: function() {
+        if(this.domainChanged) {
+          return [0, this.y.bandwidth()/2];
+        }
       }
 
     });
