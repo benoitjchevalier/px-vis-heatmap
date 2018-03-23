@@ -14,6 +14,8 @@
 <link rel="import" href="../px-vis/px-vis-behavior-d3.html">
 <link rel="import" href="../px-vis/px-vis-behavior-renderer.html">
 
+<link rel="import" href="px-heatmap-behavior.html">
+
 <link rel="import" href="px-vis-heatmap-cell.html">
 <link rel="import" href="px-vis-heatmap-legend.html">
 <link rel="import" href="px-vis-heatmap-custom-column.html">
@@ -81,23 +83,6 @@
         margin="[[_internalMargin]]"
         canvas-context="{{overlayCanvasContext}}">
       </px-vis-canvas>
-      <!-- scale -->
-      <px-vis-scale
-        id="scale"
-        x-axis-type="[[xAxisType]]"
-        y-axis-type="[[yAxisType]]"
-        complete-series-config="[[completeSeriesConfig]]"
-        chart-extents="[[chartExtents]]"
-        data-extents="[[dataExtents]]"
-        width="[[_internalWidth]]"
-        height="[[_internalHeight]]"
-        margin="[[_internalMargin]]"
-        chart-data="[[chartData]]"
-        x="{{x}}"
-        y="{{y}}"
-        scale-padding="[[scalePadding]]"
-        domain-changed="{{domainChanged}}">
-      </px-vis-scale>
       <!-- y axis -->
       <px-vis-axis
         id="yAxis"
@@ -266,6 +251,7 @@
           orientation="[[_legendOrientation]]"
           gap-size="[[_legendGapSize]]"
           complete-series-config="[[completeSeriesConfig]]"
+          series-key="[[seriesKey]]"
           domain-changed="[[domainChanged]]">
         </px-vis-heatmap-legend>
       </template>
@@ -282,7 +268,8 @@
       delay="[[tooltipDelay]]"
       ignore-target-events
       smart-orientation>
-      <div id="tooltipContent"></div>
+       <!-- setting margin to -3px in order to get a rough 20px padding -->
+       <div id="tooltipContent" style="margin:-3px;"></div>
     </px-tooltip>
   </template>
   <script>
@@ -312,7 +299,9 @@
         PxVisBehaviorChart.subConfiguration,
         PxVisBehaviorD3.canvasContext,
         PxVisBehaviorD3.svgLower,
-        PxVisBehaviorRenderer.base
+        PxVisBehaviorRenderer.base,
+        PxBehaviorHeatmap.normalizeObjects,
+        PxVisBehaviorScale.scale
       ],
 
       properties: {
@@ -473,6 +462,9 @@
           type: Object
         },
 
+        /**
+         * Delay in miliseconds before tooltip appears.
+         */
         tooltipDelay: {
           type: Number,
           value: 0
@@ -564,11 +556,13 @@
         },
 
         _internalWidth: {
-          type: Number
+          type: Number,
+          value: 500
         },
 
         _internalHeight: {
-          type: Number
+          type: Number,
+          value: 500
         },
 
         _internalMargin: {
@@ -608,6 +602,11 @@
 
         _highlightedData: {
           type: Array
+        },
+
+        xAxisType: {
+          type: String,
+          value: 'scaleBand'
         }
 
       },
@@ -615,20 +614,28 @@
       observers: [
 
         '_renderChartData(canvasContext, mutedSeries.*, completeSeriesConfig.*, seriesKey, _colorScale, _stylesResolved, _internalMargin, showCellValue)',
-        '_updateDataExtents(chartData, chartData.*, paddingOuter)',
+        '_updateDataExtents(chartData, chartData.*, paddingOuter, completeSeriesConfig, seriesKey)',
         '_updateSeriesConfig(seriesConfig)',
         '_updateSeriesConfig(_colorsAreSet)',
-        '_updateSeriesKey(seriesKey)',
-        '_updateColorScale(chartData.*, colors.*, domainChanged)',
-        '_updateInternalSize(squareMode, width, height, _internalMargin.*)',
+        '_updateColorScale(chartData.*, colors.*, domainChanged, completeSeriesConfig, seriesKey)',
+        '_updateInternalSize(chartData, chartData.*, squareMode, width, height, _internalMargin, _internalMargin.*, completeSeriesConfig, seriesKey)',
         '_updateInternalMargin(showCustomColumn, customColumnConfig, margin.*)',
         '_updateLegendGapSize(showCustomColumn, customColumnConfig.*, _legendOrientation)',
         '_xAxisConfigChanged(xAxisConfig)',
         '_yAxisConfigChanged(yAxisConfig)',
         '_legendConfigChanged(showLegend, legendConfig)',
         '_customColumnConfigChanged(showCustomColumn, customColumnConfig)',
-        '_resolveCssVars(_stylesUpdated)',
-        '_tooltipDataChanged(tooltipData)'
+        '_resolveCssVars(_stylesUpdated, completeSeriesConfig)',
+        '_tooltipDataChanged(tooltipData)',
+        '_test(domainChanged)',
+
+        '_setXScale(width, margin, xAxisType)',
+        '_setYScale(height, margin, yAxisType)',
+        '_setDomain(_chartDataHasChanged, x, y, completeSeriesConfig, dataExtents)',
+        '_setDomain(chartExtents, dataExtents)',
+        '_chartDataChanged(chartData.*)',
+        '_updatePadding(scalePadding)',
+        '_updateLogBase(logBase)'
       ],
 
       listeners: {
@@ -636,11 +643,50 @@
         'iron-resize': '_onIronResize'
       },
 
-      ready: function() {
-        this.set('numberOfLayers', 5);
+      created() {
         this.xAxisType = 'scaleBand';
         this.yAxisType = 'scaleBand';
+      },
+
+      _test() {
+
+      },
+
+      ready: function() {
+        this.set('numberOfLayers', 5);
         this.tooltipContent = this.$.tooltip.querySelector('#tooltipContent');
+      },
+
+      // TODO: remove this over-ride when getImage doesn't use this.height and this.width
+      /**
+       * Takes a graphic "snapshot" of the component and pass results through a callback:
+       * - a canvas containing the graphical snapshot
+       * - a png base 64 data uri
+       *
+       * callback object:
+       * {
+       *  canvas: theCanvasObject
+       *  image: "data:image/png;base64;iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACN..."
+       * }
+       *
+       * the data uri can be used to save the image and the canvas object to do
+       * further processing, such as combining different elements snapshot into one image
+       *
+       */
+      getImage: function(callback, renderLegend) {
+        const originalHeight = this.height;
+        const originalWidth = this.width;
+        this.set('width', this._internalWidth);
+        this.set('height', this._internalHeight);
+        const getImageFunc = PxVisBehaviorChart.saveImage[0].getImage
+          || PxVisBehaviorChart.saveImage[1].getImage;
+        getImageFunc.call(this, function(canvas, image) {
+          this.set('width', originalWidth);
+          this.set('height', originalHeight);
+          if (callback) {
+            return callback(canvas, image);
+          }
+        }.bind(this), renderLegend);
       },
 
       _collapseQueryIsValid: function(query) {
@@ -679,14 +725,16 @@
       },
 
       _updateDataExtents: function() {
-        if(!this.chartData || !this.x || !this.y) {
+        if (!this.chartData || !this.x || !this.y || !this.completeSeriesConfig || !this.seriesKey) {
           return;
         }
-        this.dataExtents = this._calcExtents(this.chartData);
-        if(this.x && this.y) {
-          this.x.paddingOuter(this.paddingOuter);
-          this.y.paddingOuter(this.paddingOuter);
-        }
+        this.debounce('update-data-extents', function() {
+          this.dataExtents = this._calcExtents(this.chartData);
+          if (this.x && this.y) {
+            this.x.paddingOuter(this.paddingOuter);
+            this.y.paddingOuter(this.paddingOuter);
+          }
+        }.bind(this), 10);
       },
 
       /**
@@ -694,20 +742,22 @@
        * values found in the chart data.
        */
       _calcExtents: function(chartData) {
-        const exts = {
-          x: [],
-          y: [],
-          value: [Infinity, -Infinity]
-        };
-        chartData.forEach((data) => {
-          if(exts.x.indexOf(data.x) < 0) {
-            exts.x.push(data.x);
+        const exts = {};
+        exts[this.completeSeriesConfig[this.seriesKey].x] = [];
+        exts[this.completeSeriesConfig[this.seriesKey].y] = [];
+        exts[this.completeSeriesConfig[this.seriesKey].value] = [Infinity, -Infinity];
+        chartData.forEach((cellData) => {
+          const data = this._normalizeChartDataItem(cellData);
+          if (exts[this.completeSeriesConfig[this.seriesKey].x].indexOf(data.x) < 0) {
+            exts[this.completeSeriesConfig[this.seriesKey].x].push(data.x);
           }
-          if(exts.y.indexOf(data.y) < 0) {
-            exts.y.push(data.y);
+          if (exts[this.completeSeriesConfig[this.seriesKey].y].indexOf(data.y) < 0) {
+            exts[this.completeSeriesConfig[this.seriesKey].y].push(data.y);
           }
-          exts.value[0] = Math.min(exts.value[0], data.value);
-          exts.value[1] = Math.max(exts.value[1], data.value);
+          exts[this.completeSeriesConfig[this.seriesKey].value][0]
+            = Math.min(exts[this.completeSeriesConfig[this.seriesKey].value][0], data.value);
+          exts[this.completeSeriesConfig[this.seriesKey].value][1]
+            = Math.max(exts[this.completeSeriesConfig[this.seriesKey].value][1], data.value);
         });
         return exts;
       },
@@ -730,7 +780,6 @@
       },
 
       _updateSeriesConfig: function() {
-
         // if app doesn't supply seriesConfig, use our default
         const seriesConfig = this.seriesConfig || {
           'series1': {
@@ -748,64 +797,52 @@
       },
 
       _updateColorScale: function() {
-        if(!this.dataExtents && !this.chartExtents) {
+        if (this.hasUndefinedArguments(arguments)) {
           return;
         }
-        if(!this.colors || this.colors.length < 1) {
-          return;
-        }
-        // get chart min and max values
-        const exts = this.chartExtents || this.dataExtents;
-        if(!exts.value) {
-          return;
-        }
-        // calculate the value threshold for each color
-        const valueThresholds = [];
-        const rangePerColor = (exts.value[1] - exts.value[0]) / (this.colors.length - 1);
-        for (let i = 0; i < this.colors.length; i++) {
-          valueThresholds.push(exts.value[0] + rangePerColor * i);
-        }
-        // in case of rounding limitations, manually set last value to our max
-        valueThresholds[valueThresholds.length - 1] = exts.value[1];
-        this.set('_colorScale', Px.d3.scaleLinear()
-          .domain(valueThresholds)
-          .range(this.colors));
+        this.debounce('update-color-scale', function() {
+          // get chart min and max values
+          let exts = this.chartExtents || this.dataExtents;
+          exts = this._normalizeExtentsObj(exts);
+          // calculate the value threshold for each color
+          const valueThresholds = [];
+          const rangePerColor = (exts.value[1] - exts.value[0]) / (this.colors.length - 1);
+          for (let i = 0; i < this.colors.length; i++) {
+            valueThresholds.push(exts.value[0] + rangePerColor * i);
+          }
+          // in case of rounding limitations, manually set last value to our max
+          valueThresholds[valueThresholds.length - 1] = exts.value[1];
+          this.set('_colorScale', Px.d3.scaleLinear()
+            .domain(valueThresholds)
+            .range(this.colors));
+        }.bind(this), 10);
       },
 
       _updateInternalSize: function() {
         if(this.hasUndefinedArguments(arguments)) {
           return;
         }
-        this.set('_internalWidth', this._getInternalWidth());
-        this.set('_internalHeight', this._getInternalHeight());
-      },
-
-      _getInternalWidth: function() {
-        let width = this.width;
-        // in squareMode we need the both axis to be equal length
-        if(this.squareMode) {
-          const axisWidth = this.width - this.margin.left - this.margin.right;
-          const axisHeight = this.height - this.margin.top - this.margin.bottom;
-          // if the width is too large, subtract the difference to make them equal
-          if(axisWidth > axisHeight) {
-            width -= (axisWidth - axisHeight);
+        this.debounce('update-internal-size', function() {
+          let width = this.width;
+          let height = this.height;
+          let exts = this.chartExtents || this.dataExtents;
+          exts = this._normalizeExtentsObj(exts);
+          // in squareMode we need each cell to have equal height and width
+          if (this.squareMode) {
+            let widthPadding = this.margin.left + this.margin.right;
+            if (this.showCustomColumn) {
+              widthPadding += this._getCustomColumn().columnWidth;
+            }
+            const heightPadding = this.margin.top + this.margin.bottom;
+            const cellHeight = (this.height - heightPadding) / exts.y.length;
+            const cellWidth = (this.width - widthPadding) / exts.x.length;
+            const minLength = Math.min(cellHeight, cellWidth);
+            width = minLength * exts.x.length + widthPadding;
+            height = minLength * exts.y.length + heightPadding;
           }
-        }
-        return width;
-      },
-
-      _getInternalHeight: function() {
-        let height = this.height;
-        // in squareMode we need the both axis to be equal length
-        if(this.squareMode) {
-          const axisWidth = this.width - this.margin.left - this.margin.right;
-          const axisHeight = this.height - this.margin.top - this.margin.bottom;
-          // if the width is too large, subtract the difference to make them equal
-          if(axisHeight > axisWidth) {
-            height -= (axisHeight - axisWidth);
-          }
-        }
-        return height;
+          this.set('_internalWidth', width);
+          this.set('_internalHeight', height);
+        }.bind(this), 10);
       },
 
       _updateInternalMargin: function() {
@@ -875,8 +912,9 @@
           return;
         }
         this.debounce('update-legend-gap-size', function() {
-          let gapSize = 20;
-          if(this.showCustomColumn && this._legendOrientation !== 'bottom') {
+          const legendConfig = this.legendConfig || {};
+          let gapSize = legendConfig.gapSize !== undefined ? legendConfig.gapSize : 15;
+          if (this.showCustomColumn && this._legendOrientation !== 'bottom') {
             const customColumn = this._getCustomColumn();
             if(customColumn) {
               gapSize += customColumn.columnWidth;
@@ -941,12 +979,13 @@
         }
       },
 
-      _createTooltipMessage: function(cell) {
-        let msg = '<h1 style="text-weight:bold;font-size:125%;">';
-        msg += 'Asset ' + cell.x + ', ' + cell.y;
+      _createTooltipMessage: function(data) {
+        let norm = this._normalizeChartDataItem(data),
+            msg = '<h1 style="text-weight:bold;font-size:12px;margin:0;">';
+        msg += 'Asset ' + norm.x + ', ' + norm.y;
         msg += '</h1>';
         // use parseFloat to be safe of XSS
-        msg += cell.value;
+        msg += '<span style="font-size:12px;">' + norm.value + '</span>';
         return msg;
       },
 
