@@ -150,6 +150,23 @@
         show-cell-value="[[showCellValue]]"
         >
       </px-vis-cell-canvas>
+      <!-- highlighted cells -->
+      <px-vis-cell-canvas
+        id="highlight"
+        clip-path
+        complete-series-config="[[completeSeriesConfig]]"
+        chart-data="[[_highlightedData]]"
+        canvas-context="[[overlayCanvasContext]]"
+        x="[[x]]"
+        y="[[y]]"
+        width="[[_internalWidth]]"
+        height="[[_internalHeight]]"
+        margin="[[_internalMargin]]"
+        color-scale="[[_colorScale]]"
+        series-id="[[seriesKey]]"
+        show-cell-value="[[showCellValue]]"
+        >
+      </px-vis-cell-canvas>
       <px-vis-gridlines
         svg="[[layer.2]]"
         axis="[[x]]"
@@ -587,6 +604,10 @@
           value: function() {
             return [];
           }
+        },
+
+        _highlightedData: {
+          type: Array
         }
 
       },
@@ -820,25 +841,33 @@
             if(this.tooltipData && this.tooltipData.series && this.tooltipData.series.length && this.tooltipData.series[0].value) {
 
               // lower opacity for entire canvas
-             // this.canvasContext.canvas.classList.add('primaryDataMask');
+              this.canvasContext.canvas.classList.add('primaryDataMask');
 
-              let rect = this.mouseRect.getBoundingClientRect();
+              this._updateTooltip();
 
-              //set tooltip msg and open
-              this.tooltipContent.innerHTML = this._createTooltipMessage(this.tooltipData.series[0].value);
-              this.$.tooltip.opened = true;
-
-              //position
-              this._ttMouseCoords = [this.tooltipData.series[0].coord[0] + this.x.bandwidth() / 2 + rect.left + window.pageXOffset,
-              this.tooltipData.series[0].coord[1] + this.y.bandwidth() / 2 + rect.top + window.pageYOffset];
+              //show highlighted data
+              this.set('_highlightedData', [this.tooltipData.series[0].value]);
+              this.$.highlight.renderOneBatch(0,1);
 
           } else {
             // remove lowered opacity
-          //  this.canvasContext.canvas.classList.remove('primaryDataMask');
+            this.canvasContext.canvas.classList.remove('primaryDataMask');
             this.$.tooltip.opened = false;
           }
           });
         }
+      },
+
+      _updateTooltip() {
+        let rect = this.mouseRect.getBoundingClientRect();
+
+        //set tooltip msg and open
+        this.tooltipContent.innerHTML = this._createTooltipMessage(this.tooltipData.series[0].value);
+        this.$.tooltip.opened = true;
+
+        //position
+        this._ttMouseCoords = [this.tooltipData.series[0].coord[0] + this.x.bandwidth() / 2 + rect.left + window.pageXOffset,
+        this.tooltipData.series[0].coord[1] + this.y.bandwidth() / 2 + rect.top + window.pageYOffset];
       },
 
       _updateLegendGapSize: function() {
