@@ -3,9 +3,10 @@
 <link rel="import" href="../px-vis/px-vis-scale.html">
 <link rel="import" href="../px-vis/px-vis-svg-canvas.html">
 <link rel="import" href="../px-vis/px-vis-axis.html">
-<link rel="import" href="../px-vis/px-vis-cell-canvas.html">
+<link rel="import" href="../px-vis/px-vis-interaction-space.html">
 <link rel="import" href="../px-vis/px-vis-gridlines.html">
 <link rel="import" href="../px-tooltip/px-tooltip.html">
+<link rel="import" href="../px-vis/px-vis-cell-canvas.html">
 
 <link rel="import" href="../px-vis/px-vis-behavior-colors.html">
 <link rel="import" href="../px-vis/px-vis-behavior-common.html">
@@ -74,7 +75,7 @@
       </px-vis-svg-canvas>
       <!-- top layer canvas used for hover effects -->
       <px-vis-canvas
-        class="canvas"
+        class="canvas noPointer"
         width="[[_internalWidth]]"
         height="[[_internalHeight]]"
         margin="[[_internalMargin]]"
@@ -150,7 +151,7 @@
         >
       </px-vis-cell-canvas>
       <px-vis-gridlines
-        svg="[[svg]]"
+        svg="[[layer.2]]"
         axis="[[x]]"
         margin="[[_internalMargin]]"
         length="[[_internalHeight]]"
@@ -159,7 +160,7 @@
         offset="[[_gridTranslationX]]">
       </px-vis-gridlines>
       <px-vis-gridlines
-        svg="[[svg]]"
+        svg="[[layer.2]]"
         axis="[[y]]"
         margin="[[_internalMargin]]"
         length="[[_internalWidth]]"
@@ -191,13 +192,35 @@
         </px-vis-heatmap-cell>
       </template> -->
 
+      <px-vis-interaction-space
+        id="interactionSpace"
+        svg="[[layer.4]]"
+        width="[[_internalWidth]]"
+        height="[[_internalHeight]]"
+        margin="[[_internalMargin]]"
+        x-axis-type="[[xAxisType]]"
+        series-keys="[[_seriesKeys]]"
+        complete-series-config="[[completeSeriesConfig]]"
+        chart-data="[[chartData]]"
+        x="[[x]]"
+        y="[[y]]"
+        domain-changed="[[domainChanged]]"
+        mouse-rect="{{mouseRect}}"
+        tooltip-data="{{tooltipData}}"
+        interaction-svg="{{interactionSvg}}"
+        extents-data="{{extentsData}}"
+        action-config="[[actionConfig]]"
+        prevent-web-worker-synchronization
+        is-heatmap>
+      </px-vis-interaction-space>
+
       <template is="dom-if" if="[[showCustomColumn]]" restamp>
         <px-vis-heatmap-custom-column
           border-color="[[cellBorderColor]]"
           border-width="[[cellBorderWidth]]"
           text-size="[[cellTextSize]]"
           text-color="[[cellTextColor]]"
-          svg="[[svg]]"
+          svg="[[layer.3]]"
           x="[[x]]"
           y="[[y]]"
           margin="[[_internalMargin]]"
@@ -214,7 +237,7 @@
       <template is="dom-if" if="[[showLegend]]" restamp>
         <px-vis-heatmap-legend
           id="legend"
-          svg="[[svg]]"
+          svg="[[layer.2]]"
           x="[[x]]"
           y="[[y]]"
           margin="[[_internalMargin]]"
@@ -235,10 +258,13 @@
     <!-- tooltip -->
     <px-tooltip
       id="tooltip"
-      for="tooltipDiv"
+      follow-mouse
+      for="[[mouseRect]]"
+      mouse-coords="[[_ttMouseCoords]]"
       orientation="top"
       delay="[[tooltipDelay]]"
-      ignore-target-events>
+      ignore-target-events
+      smart-orientation>
       <div id="tooltipContent"></div>
     </px-tooltip>
   </template>
@@ -287,6 +313,22 @@
         seriesKey: {
           type: String
         },
+
+        /**
+        * Configuration used to define what actions happen on events. Each key represents an event,
+        * each value can be:
+        * - a predefined action found as a key in px-vis-interaction-space `actionMapping`
+        * - a function, where `this` will be bound to the chart and the function's argument will be the mouse position on the chart
+        */
+      actionConfig: {
+        type: Object,
+        value: function() {
+          return {
+            'mouseout': 'resetTooltip',
+            'mousemove': 'calcTooltipData'
+          };
+        }
+      },
 
         /**
         * The width of the elem; generally the width of the charting area for most components
@@ -472,14 +514,8 @@
           type: String
         },
 
-        /**
-         * Currently selected cell object. Setting this will cause the cell to be shown
-         * the same way it would with a mouse hover event. This should be an object from the
-         * chartData array.
-         */
-        selectedCell: {
-          type: Object,
-          observer: '_selectedCellChanged'
+        tooltipData: {
+          type: Object
         },
 
         /**
@@ -544,13 +580,20 @@
         _gridTranslationY: {
           type: Array,
           computed: '_computeGridTranslationY(domainChanged)'
+        },
+
+        _ttMouseCoords: {
+          type: Array,
+          value: function() {
+            return [];
+          }
         }
 
       },
 
       observers: [
 
-        '_renderChartData(domainChanged, canvasContext, chartData.*, mutedSeries.*, completeSeriesConfig.*, seriesKey, _colorScale, _stylesResolved, _internalMargin)',
+        '_renderChartData(canvasContext, mutedSeries.*, completeSeriesConfig.*, seriesKey, _colorScale, _stylesResolved, _internalMargin, showCellValue)',
         '_updateDataExtents(chartData, chartData.*, paddingOuter)',
         '_updateSeriesConfig(seriesConfig)',
         '_updateSeriesConfig(_colorsAreSet)',
@@ -563,7 +606,8 @@
         '_yAxisConfigChanged(yAxisConfig)',
         '_legendConfigChanged(showLegend, legendConfig)',
         '_customColumnConfigChanged(showCustomColumn, customColumnConfig)',
-        '_resolveCssVars(_stylesUpdated)'
+        '_resolveCssVars(_stylesUpdated)',
+        '_tooltipDataChanged(tooltipData)'
       ],
 
       listeners: {
@@ -578,67 +622,21 @@
         this.tooltipContent = this.$.tooltip.querySelector('#tooltipContent');
       },
 
-      _drawCells: function() {
-        if (this.hasUndefinedArguments(arguments)) {
-          return;
-        }
-        this.debounce('chart-drawn-debounce', () => {
-          this.canvasContext.pxClearCanvas();
-          this.chartData.forEach((d) => {
-            this._drawCell(this.canvasContext, d);
-          });
-          // add mouse event handlers - add to overlay canvas because its on the top layer
-          this.overlayCanvasContext.canvas.onmousemove = this._handleMouseMove.bind(this);
-          this.overlayCanvasContext.canvas.onmouseout = this._handleMouseMove.bind(this);
-          this.overlayCanvasContext.canvas.onclick = this._handleClick.bind(this);
-          // fire rendered event
-          this.fire('chart-drawn', {
-            heatmap: this
-          });
-        }, this.drawDebounceTime);
-      },
-
-      _drawCell: function(canvasContext, cellData) {
-        const borderWidth = parseFloat(this.cellBorderWidth.replace('px', ''));
-        // draw and fill rectangle
-        canvasContext.beginPath();
-        canvasContext.rect(this.x(cellData.x), this.y(cellData.y), this.x.bandwidth(), this.y.bandwidth());
-        canvasContext.fillStyle = this._colorScale(cellData.value);
-        canvasContext.fill();
-        // draw border
-        if (!isNaN(borderWidth) && borderWidth > 0) {
-          canvasContext.strokeStyle = this.cellBorderColor;
-          canvasContext.lineWidth = this.cellBorderWidth.replace('px', '');
-          canvasContext.stroke();
-        }
-        // draw value if needed
-        if (this.showCellValue) {
-          const xPos = this.x(cellData.x) + this.x.bandwidth() / 2;
-          const yPos = this.y(cellData.y) + this.y.bandwidth() / 2;
-          canvasContext.beginPath();
-          canvasContext.font = this.cellTextSize + ' Arial';
-          canvasContext.fillStyle = this.cellTextColor;
-          canvasContext.textAlign = 'center';
-          canvasContext.textBaseline = 'middle';
-          canvasContext.fillText(cellData.value, xPos, yPos, this.x.bandwidth());
-        }
-      },
-
       _collapseQueryIsValid: function(query) {
-        if (typeof query === 'number') {
+        if(typeof query === 'number') {
           return true;
         }
-        if (typeof query === 'string' && query.slice(-2) === 'px' && !isNaN(parseInt(query))) {
+        if(typeof query === 'string' && query.slice(-2) === 'px' && !isNaN(parseInt(query))) {
           return true;
         }
         return false;
       },
 
       _getCollapseQuery: function(collapseAt) {
-        if (typeof collapseAt === 'number') {
+        if(typeof collapseAt === 'number') {
           return collapseAt + 'px';
         }
-        if (typeof collapseAt === 'string' && collapseAt.slice(-2) === 'px' || !isNaN(parseInt(collapseAt))) {
+        if(typeof collapseAt === 'string' && collapseAt.slice(-2) === 'px' || !isNaN(parseInt(collapseAt))) {
           return collapseAt;
         }
       },
@@ -650,7 +648,7 @@
       _onIronResize: function() {
         this.debounce('ironresize', function() {
           // make sure we are not preventing resize in case it changed while debouncing
-          if (this.preventResize) {
+          if(this.preventResize) {
             return;
           }
           const wrapperRect = this.$.wrapper.getBoundingClientRect();
@@ -660,11 +658,11 @@
       },
 
       _updateDataExtents: function() {
-        if (!this.chartData || !this.x || !this.y) {
+        if(!this.chartData || !this.x || !this.y) {
           return;
         }
         this.dataExtents = this._calcExtents(this.chartData);
-        if (this.x && this.y) {
+        if(this.x && this.y) {
           this.x.paddingOuter(this.paddingOuter);
           this.y.paddingOuter(this.paddingOuter);
         }
@@ -681,10 +679,10 @@
           value: [Infinity, -Infinity]
         };
         chartData.forEach((data) => {
-          if (exts.x.indexOf(data.x) < 0) {
+          if(exts.x.indexOf(data.x) < 0) {
             exts.x.push(data.x);
           }
-          if (exts.y.indexOf(data.y) < 0) {
+          if(exts.y.indexOf(data.y) < 0) {
             exts.y.push(data.y);
           }
           exts.value[0] = Math.min(exts.value[0], data.value);
@@ -698,10 +696,10 @@
        * equal.
        */
       _isExtEqual: function(extA, extB) {
-        if (!extA && extB || extA && !extB) {
+        if(!extA && extB || extA && !extB) {
           return false;
         }
-        if (!extA && !extB) {
+        if(!extA && !extB) {
           return true;
         }
         return extA.x[0] === extB.x[0]
@@ -720,35 +718,24 @@
             'y': 'y',
             'value': 'value'
           }
-        };
+        },
+            keys = Object.keys(seriesConfig);
         // because we only expect a single series, find the first key and assume thats the series key
-        this.set('seriesKey', Object.keys(seriesConfig)[0]);
+        this.set('seriesKey', keys[0]);
+        this.set('_seriesKeys', keys);
         this.set('completeSeriesConfig', seriesConfig);
       },
 
-      _updateSeriesKey: function() {
-        if (this.hasUndefinedArguments(arguments)) {
-          return;
-        }
-        let cells;
-        if (this.shadowRoot) {
-          cells = this.shadowRoot.querySelectorAll('px-vis-heatmap-cell');
-        } else {
-          cells = Polymer.dom(this.root).querySelectorAll('px-vis-heatmap-cell');
-        }
-        cells.forEach((cell) => cell.seriesKey = this.seriesKey);
-      },
-
       _updateColorScale: function() {
-        if (!this.dataExtents && !this.chartExtents) {
+        if(!this.dataExtents && !this.chartExtents) {
           return;
         }
-        if (!this.colors || this.colors.length < 1) {
+        if(!this.colors || this.colors.length < 1) {
           return;
         }
         // get chart min and max values
         const exts = this.chartExtents || this.dataExtents;
-        if (!exts.value) {
+        if(!exts.value) {
           return;
         }
         // calculate the value threshold for each color
@@ -765,7 +752,7 @@
       },
 
       _updateInternalSize: function() {
-        if (this.hasUndefinedArguments(arguments)) {
+        if(this.hasUndefinedArguments(arguments)) {
           return;
         }
         this.set('_internalWidth', this._getInternalWidth());
@@ -775,11 +762,11 @@
       _getInternalWidth: function() {
         let width = this.width;
         // in squareMode we need the both axis to be equal length
-        if (this.squareMode) {
+        if(this.squareMode) {
           const axisWidth = this.width - this.margin.left - this.margin.right;
           const axisHeight = this.height - this.margin.top - this.margin.bottom;
           // if the width is too large, subtract the difference to make them equal
-          if (axisWidth > axisHeight) {
+          if(axisWidth > axisHeight) {
             width -= (axisWidth - axisHeight);
           }
         }
@@ -789,11 +776,11 @@
       _getInternalHeight: function() {
         let height = this.height;
         // in squareMode we need the both axis to be equal length
-        if (this.squareMode) {
+        if(this.squareMode) {
           const axisWidth = this.width - this.margin.left - this.margin.right;
           const axisHeight = this.height - this.margin.top - this.margin.bottom;
           // if the width is too large, subtract the difference to make them equal
-          if (axisHeight > axisWidth) {
+          if(axisHeight > axisWidth) {
             height -= (axisHeight - axisWidth);
           }
         }
@@ -801,7 +788,7 @@
       },
 
       _updateInternalMargin: function() {
-        if (this.hasUndefinedArguments(arguments)) {
+        if(this.hasUndefinedArguments(arguments)) {
           return;
         }
         this.debounce('update-internal-margin', function() {
@@ -812,9 +799,9 @@
             right: this.margin.right
           };
           // add additional margin for custom column
-          if (this.showCustomColumn) {
+          if(this.showCustomColumn) {
             const customColumn = this._getCustomColumn();
-            if (customColumn && customColumn.columnWidth) {
+            if(customColumn && customColumn.columnWidth) {
               margin.right += customColumn.columnWidth;
             }
           }
@@ -822,45 +809,47 @@
         }.bind(this), 10);
       },
 
-      _selectedCellChanged: function(selectedCell, prevSelectedCell) {
-        // clear overlay canvas
-        this.overlayCanvasContext.pxClearCanvas();
-        if (selectedCell) {
-          // lower opacity for entire canvas
-          this.canvasContext.canvas.classList.add('primaryDataMask');
-          // redraw our selected cell on the top layer canvas
-          this._drawCell(this.overlayCanvasContext, selectedCell);
-          // show tooltip (need to close then open to force reposition)
-          this._closeTooltip();
-          this._showTooltip(selectedCell, this._createTooltipMessage(selectedCell));
-        } else {
-          // remove lowered opacity
-          this.canvasContext.canvas.classList.remove('primaryDataMask');
-          // hide tooltip
-          this._closeTooltip();
-        }
-        // fire mouseover and mouseout events
-        if (prevSelectedCell) {
-          this.fire('cell-mouseout', {
-            cell: prevSelectedCell
-          });
-        }
-        if (selectedCell) {
-          this.fire('cell-mouseover', {
-            cell: selectedCell
+      _tooltipDataChanged: function() {
+
+        if(this.overlayCanvasContext) {
+
+          window.requestAnimationFrame(() => {
+
+            // clear overlay canvas
+            this.overlayCanvasContext.pxClearCanvas();
+            if(this.tooltipData && this.tooltipData.series && this.tooltipData.series.length && this.tooltipData.series[0].value) {
+
+              // lower opacity for entire canvas
+             // this.canvasContext.canvas.classList.add('primaryDataMask');
+
+              let rect = this.mouseRect.getBoundingClientRect();
+
+              //set tooltip msg and open
+              this.tooltipContent.innerHTML = this._createTooltipMessage(this.tooltipData.series[0].value);
+              this.$.tooltip.opened = true;
+
+              //position
+              this._ttMouseCoords = [this.tooltipData.series[0].coord[0] + this.x.bandwidth() / 2 + rect.left + window.pageXOffset,
+              this.tooltipData.series[0].coord[1] + this.y.bandwidth() / 2 + rect.top + window.pageYOffset];
+
+          } else {
+            // remove lowered opacity
+          //  this.canvasContext.canvas.classList.remove('primaryDataMask');
+            this.$.tooltip.opened = false;
+          }
           });
         }
       },
 
       _updateLegendGapSize: function() {
-        if (this.hasUndefinedArguments(arguments)) {
+        if(this.hasUndefinedArguments(arguments)) {
           return;
         }
         this.debounce('update-legend-gap-size', function() {
           let gapSize = 20;
-          if (this.showCustomColumn && this._legendOrientation !== 'bottom') {
+          if(this.showCustomColumn && this._legendOrientation !== 'bottom') {
             const customColumn = this._getCustomColumn();
-            if (customColumn) {
+            if(customColumn) {
               gapSize += customColumn.columnWidth;
             }
           }
@@ -869,46 +858,46 @@
       },
 
       _xAxisConfigChanged: function(xAxisConfig) {
-        if (this.hasUndefinedArguments(arguments)) {
+        if(this.hasUndefinedArguments(arguments)) {
           return;
         }
         this._applyConfigToElement(xAxisConfig, this.$.xAxis);
       },
 
       _yAxisConfigChanged: function(yAxisConfig) {
-        if (this.hasUndefinedArguments(arguments)) {
+        if(this.hasUndefinedArguments(arguments)) {
           return;
         }
         this._applyConfigToElement(yAxisConfig, this.$.yAxis);
       },
 
       _legendConfigChanged: function(showLegend, legendConfig) {
-        if (this.hasUndefinedArguments(arguments)) {
+        if(this.hasUndefinedArguments(arguments)) {
           return;
         }
         // debouncing because this gets called before dom-if that instantiates legend happens
         this.debounce('legend-config-changed', function() {
           const legend = this._getLegend();
-          if (legend) {
+          if(legend) {
             this._applyConfigToElement(legendConfig, legend);
           }
         }.bind(this), 10);
       },
 
       _customColumnConfigChanged: function(showCustomColumn, customColumnConfig) {
-        if (this.hasUndefinedArguments(arguments)) {
+        if(this.hasUndefinedArguments(arguments)) {
           return;
         }
         this.debounce('custom-column-config-changed', function() {
           const customColumn = this._getCustomColumn();
-          if (customColumn) {
+          if(customColumn) {
             this._applyConfigToElement(customColumnConfig, customColumn);
           }
         }.bind(this), 10);
       },
 
       _getLegend: function() {
-        if (this.shadowRoot) {
+        if(this.shadowRoot) {
           return this.shadowRoot.querySelector('px-vis-heatmap-legend');
         } else {
           return Polymer.dom(this.root).querySelector('px-vis-heatmap-legend');
@@ -916,95 +905,11 @@
       },
 
       _getCustomColumn: function() {
-        if (this.shadowRoot) {
+        if(this.shadowRoot) {
           return this.shadowRoot.querySelector('px-vis-heatmap-custom-column');
         } else {
           return Polymer.dom(this.root).querySelector('px-vis-heatmap-custom-column');
         }
-      },
-
-      _handleMouseMove: function(e) {
-        this.selectedCell = this._getCellFromMouseEvent(e);
-      },
-
-      _handleClick: function(e) {
-        const cell = this._getCellFromMouseEvent(e);
-        if (cell) {
-          this.fire('cell-click', {
-            cell: cell
-          });
-        }
-      },
-
-      _getCellFromMouseEvent: function(e) {
-        let cell;
-        // get canvas coords
-        const canvasRect = this.canvasContext.canvas.getBoundingClientRect();
-        const mouseX = e.clientX - canvasRect.left - this.margin.left;
-        const mouseY = e.clientY - canvasRect.top - this.margin.top;
-        // calc bounding area for cells
-        const bounds = {
-          top: 0,
-          bottom: (canvasRect.bottom - canvasRect.top) - (this.margin.top + this.margin.bottom),
-          left: 0,
-          right: (canvasRect.right - canvasRect.left) - (this.margin.right + this.margin.left)
-        };
-        // make sure mouse is over cell area
-        if (mouseX < bounds.left || mouseX > bounds.right
-            || mouseY < bounds.top || mouseY > bounds.bottom) {
-          // do nothing
-        } else {
-          // calculate which cell
-          const x = this.x.invert(mouseX);
-          const y = this.y.invert(mouseY);
-          cell = this._getCellByPosition(x, y);
-        }
-        return cell;
-      },
-
-      /**
-       * Returns cell data from chartData which exist in the x and y categories.
-       * Note xPos and yPos are NOT pixel values, but values that should exist
-       * in the chartExtents or dataExtents.
-       */
-      _getCellByPosition: function(xPos, yPos) {
-        let cell;
-        this.chartData.forEach((item) => {
-          if (item.x === xPos && item.y === yPos) {
-            cell = item;
-          }
-        });
-        return cell;
-      },
-
-      _handleCellMouseover: function(e, details) {
-        // show over cell value if available, otherwise over entire cell
-        const el = details.cell.getSvgTextElement() || details.cell.getSvgElement();
-        // update hover opacities and the tooltip
-        this._setHoveredCell(details.cell, 1, 0.3, this.tooltipDelay);
-        this._showTooltip(el, this._createTooltipMessage(details.cell));
-      },
-
-      _handleCellMouseout: function(e, details) {
-        this._setHoveredCell(null, 1, 1, 0);
-        this._closeTooltip();
-      },
-
-      _showTooltip: function(cell, msg) {
-        const tooltipMarginBottom = -20;
-        // get absolute position for tooltip
-        const x = this.x(cell.x) + this.margin.left + this.x.bandwidth() / 2;
-        const y = this.y(cell.y) - tooltipMarginBottom;
-        this.$.tooltipDiv.style.left = x + 'px';
-        // this.$.tooltipDiv.style.left = 0;
-        this.$.tooltipDiv.style.top = y + 'px';
-        // this.$.tooltipDiv.style.top = 0;
-        this.tooltipContent.innerHTML = msg;
-        this.$.tooltip.opened = true;
-      },
-
-      _closeTooltip: function() {
-        this.$.tooltip.opened = false;
       },
 
       _createTooltipMessage: function(cell) {
@@ -1036,11 +941,11 @@
           this.$.xAxis.updateStyles();
           this.$.yAxis.updateStyles();
           const legend = this._getLegend();
-          if (legend) {
+          if(legend) {
             legend.updateStyles();
           }
           const customColumn = this._getCustomColumn();
-          if (customColumn) {
+          if(customColumn) {
             customColumn.updateStyles();
           }
           // notify that style vars have changed
@@ -1054,12 +959,12 @@
         let i = 0;
         while (color !== undefined) {
           color = this._checkThemeVariable(rulePrefix + i);
-          if (color !== undefined) {
+          if(color !== undefined) {
             colors.push(color);
           }
           i++;
         }
-        if (!colors || colors.length < 1) {
+        if(!colors || colors.length < 1) {
           colors = defaultColors;
         }
         return colors;
