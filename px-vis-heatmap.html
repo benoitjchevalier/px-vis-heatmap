@@ -619,7 +619,7 @@
         '_updateSeriesConfig(seriesConfig)',
         '_updateSeriesConfig(_colorsAreSet)',
         '_updateColorScale(chartData.*, colors.*, domainChanged, completeSeriesConfig, seriesKey)',
-        '_updateInternalSize(squareMode, x, y, width, height, domainChanged, _internalMargin, showCustomColumn)',
+        '_updateInternalSize(squareMode, x, y, width, height, _internalMargin, showCustomColumn, domainChanged)',
         '_updateInternalMargin(showCustomColumn, customColumnConfig, margin.*)',
         '_updateLegendGapSize(showCustomColumn, customColumnConfig.*, _legendOrientation)',
         '_xAxisConfigChanged(xAxisConfig)',
@@ -628,10 +628,9 @@
         '_customColumnConfigChanged(showCustomColumn, customColumnConfig)',
         '_resolveCssVars(_stylesUpdated, completeSeriesConfig)',
         '_tooltipDataChanged(tooltipData)',
-        '_test(domainChanged)',
 
-        '_setXScale(_internalWidth, margin, xAxisType)',
-        '_setYScale(_internalHeight, margin, yAxisType)',
+        '_setXScale(_internalWidth, _internalMargin, xAxisType)',
+        '_setYScale(_internalHeight, _internalMargin, yAxisType)',
         '_setDomain(_chartDataHasChanged, x, y, completeSeriesConfig, dataExtents)',
         '_setDomain(chartExtents, dataExtents)',
         '_chartDataChanged(chartData.*)',
@@ -646,10 +645,6 @@
       created() {
         this.xAxisType = 'scaleBand';
         this.yAxisType = 'scaleBand';
-      },
-
-      _test() {
-
       },
 
       ready: function() {
@@ -730,36 +725,17 @@
             if(this.squareMode && this.x && this.x.domain().length && this.y && this.y.domain().length) {
 
               //find limiting factor
-              let xWidth = this.width - this._internalMargin.left - this._internalMargin.right,
-                  yWidth = this.height - this._internalMargin.top - this._internalMargin.bottom,
+              let xPadding = this._internalMargin.left + this._internalMargin.right ,
+                  yPadding = this._internalMargin.top + this._internalMargin.bottom,
+                  xWidth = newWidth - xPadding,
+                  yWidth = newHeight - yPadding,
                   cellSize = Math.min(xWidth/this.x.domain().length, yWidth/this.y.domain().length);
 
-              newWidth = this.x.domain().length * cellSize + this.margin.left + this.margin.right;
-              newHeight = this.y.domain().length * cellSize + this.margin.top + this.margin.bottom;
+              newWidth = this.x.domain().length * cellSize + this._internalMargin.left + this._internalMargin.right;
+              newHeight = this.y.domain().length * cellSize + yPadding;
+
             }
 
-            if (this.showCustomColumn) {
-                newWidth -= this._getCustomColumn().columnWidth;
-              }
-
-          //  exts = this._normalizeExtentsObj(exts);
-            // in squareMode we need each cell to have equal height and width
-            // if (this.squareMode) {
-            //   let newWidth = this.width;//this.margin.left + this.margin.right;
-            //   if (this.showCustomColumn) {
-            //     width -= this._getCustomColumn().columnWidth;
-            //   }
-            //   // const heightPadding = this.margin.top + this.margin.bottom;
-            //   // const cellHeight = (this.height - heightPadding) / exts.y.length;
-            //   // const cellWidth = (this.width - widthPadding) / exts.x.length;
-            //   // const minLength = Math.min(cellHeight, cellWidth);
-
-            //   width = Math.min(newWidth, height);
-
-
-            //   width += minLength * exts.x.length + widthPadding;
-            //   height = minLength * exts.y.length + heightPadding;
-            // }
             this.set('_internalWidth', newWidth);
             this.set('_internalHeight', newHeight);
           }
