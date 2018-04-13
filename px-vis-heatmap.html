@@ -63,7 +63,7 @@
 
       <div id="wrapper" class$="{{_chartWrapperClass}}">
     -->
-    <div id="wrapper" class="flex wrapper">
+    <div id="wrapper" class$="{{_chartWrapperClass}}">
 
       <!-- main svg and canvas -->
       <px-vis-svg-canvas
@@ -125,6 +125,7 @@
         complete-series-config="[[completeSeriesConfig]]"
         chart-data="[[chartData]]"
         canvas-context="[[canvasContext]]"
+        square-mode="[[squareMode]]"
         x="[[x]]"
         y="[[y]]"
         width="[[_internalWidth]]"
@@ -613,12 +614,12 @@
 
       observers: [
 
-        '_renderChartData(canvasContext, mutedSeries.*, completeSeriesConfig.*, seriesKey, _colorScale, _stylesResolved, _internalMargin, showCellValue, _internalWidth, _internalHeight)',
+        '_renderChartData(canvasContext, mutedSeries.*, completeSeriesConfig.*, seriesKey, _colorScale, _stylesResolved, _internalMargin, showCellValue, _internalWidth, _internalHeight, squareMode)',
         '_updateDataExtents(chartData, chartData.*, paddingOuter, completeSeriesConfig, seriesKey)',
         '_updateSeriesConfig(seriesConfig)',
         '_updateSeriesConfig(_colorsAreSet)',
         '_updateColorScale(chartData.*, colors.*, domainChanged, completeSeriesConfig, seriesKey)',
-        '_updateInternalSize(chartData, chartData.*, squareMode, width, height, _internalMargin, _internalMargin.*, completeSeriesConfig, seriesKey)',
+        '_updateInternalSize(squareMode, x, y, width, height, domainChanged, _internalMargin, showCustomColumn)',
         '_updateInternalMargin(showCustomColumn, customColumnConfig, margin.*)',
         '_updateLegendGapSize(showCustomColumn, customColumnConfig.*, _legendOrientation)',
         '_xAxisConfigChanged(xAxisConfig)',
@@ -629,8 +630,8 @@
         '_tooltipDataChanged(tooltipData)',
         '_test(domainChanged)',
 
-        '_setXScale(width, margin, xAxisType)',
-        '_setYScale(height, margin, yAxisType)',
+        '_setXScale(_internalWidth, margin, xAxisType)',
+        '_setYScale(_internalHeight, margin, yAxisType)',
         '_setDomain(_chartDataHasChanged, x, y, completeSeriesConfig, dataExtents)',
         '_setDomain(chartExtents, dataExtents)',
         '_chartDataChanged(chartData.*)',
@@ -639,8 +640,7 @@
       ],
 
       listeners: {
-        'px-data-vis-colors-applied': '_colorsSet',
-        'iron-resize': '_onIronResize'
+        'px-data-vis-colors-applied': '_colorsSet'
       },
 
       created() {
@@ -712,16 +712,58 @@
         this.set('_legendOrientation', this.collapsed ? 'bottom' : 'right');
       },
 
-      _onIronResize: function() {
-        this.debounce('ironresize', function() {
-          // make sure we are not preventing resize in case it changed while debouncing
-          if(this.preventResize) {
-            return;
+      _resizeCalculations: function() {
+        const wrapperRect = this.$.wrapper.getBoundingClientRect();
+
+        this.set('width', wrapperRect.width);
+        this.set('height', wrapperRect.height);
+      },
+
+      _updateInternalSize: function() {
+
+        this.debounce('_updateInternalSize', function() {
+
+          if(this.width && this.height) {
+            let newWidth = this.width,
+                newHeight = this.height;
+
+            if(this.squareMode && this.x && this.x.domain().length && this.y && this.y.domain().length) {
+
+              //find limiting factor
+              let xWidth = this.width - this._internalMargin.left - this._internalMargin.right,
+                  yWidth = this.height - this._internalMargin.top - this._internalMargin.bottom,
+                  cellSize = Math.min(xWidth/this.x.domain().length, yWidth/this.y.domain().length);
+
+              newWidth = this.x.domain().length * cellSize + this.margin.left + this.margin.right;
+              newHeight = this.y.domain().length * cellSize + this.margin.top + this.margin.bottom;
+            }
+
+            if (this.showCustomColumn) {
+                newWidth -= this._getCustomColumn().columnWidth;
+              }
+
+          //  exts = this._normalizeExtentsObj(exts);
+            // in squareMode we need each cell to have equal height and width
+            // if (this.squareMode) {
+            //   let newWidth = this.width;//this.margin.left + this.margin.right;
+            //   if (this.showCustomColumn) {
+            //     width -= this._getCustomColumn().columnWidth;
+            //   }
+            //   // const heightPadding = this.margin.top + this.margin.bottom;
+            //   // const cellHeight = (this.height - heightPadding) / exts.y.length;
+            //   // const cellWidth = (this.width - widthPadding) / exts.x.length;
+            //   // const minLength = Math.min(cellHeight, cellWidth);
+
+            //   width = Math.min(newWidth, height);
+
+
+            //   width += minLength * exts.x.length + widthPadding;
+            //   height = minLength * exts.y.length + heightPadding;
+            // }
+            this.set('_internalWidth', newWidth);
+            this.set('_internalHeight', newHeight);
           }
-          const wrapperRect = this.$.wrapper.getBoundingClientRect();
-          this.set('width', wrapperRect.width);
-          this.set('height', wrapperRect.height);
-        }, this.debounceResizeTiming);
+        }, 10);
       },
 
       _updateDataExtents: function() {
@@ -818,33 +860,6 @@
         }.bind(this), 10);
       },
 
-      _updateInternalSize: function() {
-        if(this.hasUndefinedArguments(arguments)) {
-          return;
-        }
-        this.debounce('update-internal-size', function() {
-          let width = this.width;
-          let height = this.height;
-          let exts = this.chartExtents || this.dataExtents;
-          exts = this._normalizeExtentsObj(exts);
-          // in squareMode we need each cell to have equal height and width
-          if (this.squareMode) {
-            let widthPadding = this.margin.left + this.margin.right;
-            if (this.showCustomColumn) {
-              widthPadding += this._getCustomColumn().columnWidth;
-            }
-            const heightPadding = this.margin.top + this.margin.bottom;
-            const cellHeight = (this.height - heightPadding) / exts.y.length;
-            const cellWidth = (this.width - widthPadding) / exts.x.length;
-            const minLength = Math.min(cellHeight, cellWidth);
-            width = minLength * exts.x.length + widthPadding;
-            height = minLength * exts.y.length + heightPadding;
-          }
-          this.set('_internalWidth', width);
-          this.set('_internalHeight', height);
-        }.bind(this), 10);
-      },
-
       _updateInternalMargin: function() {
         if(this.hasUndefinedArguments(arguments)) {
           return;
@@ -889,6 +904,7 @@
           } else {
             // remove lowered opacity
             this.canvasContext.canvas.classList.remove('primaryDataMask');
+            this.set('_highlightedData', []);
             this.$.tooltip.opened = false;
           }
           });

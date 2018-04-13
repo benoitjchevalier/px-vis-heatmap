@@ -227,9 +227,9 @@
       },
 
       observers: [
-        '_defineGradient(colorScale, _stylesResolved)',
+        '_defineGradient(svg, colorScale, _stylesResolved)',
         '_updateRectangePosition(_rect, orientation, width, gapSize, margin.*, domainChanged, _stylesResolved)',
-        '_drawRectangle(orientation, width, height, legendWidth, domainChanged, _stylesResolved)',
+        '_drawRectangle(svg, orientation, width, height, legendWidth, domainChanged, _stylesResolved)',
         '_yAxisConfigChanged(yAxisConfig)',
         '_updateAxisScale(orientation, _axisX, _axisY)',
         '_updateAxisMargin(orientation, width, height, legendWidth, gapSize, margin.*, x, y, domainChanged)',
