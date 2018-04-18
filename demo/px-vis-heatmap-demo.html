@@ -68,6 +68,7 @@
               show-legend="{{props.showLegend.value}}"
               legend-config="{{props.legendConfig.value}}"
               collapse-at="{{props.collapseAt.value}}"
+              hide-gridlines="{{props.hideGridlines.value}}"
               on-collapsed-changed="_collapsedChanged"
               on-cell-click="_handleCellClick"
               on-cell-mouseover="_handleCellMouseover"
@@ -226,6 +227,11 @@
         type: Number,
         inputType: 'text',
         inputDisabled: false
+      },
+
+      hideGridlines: {
+        type: Boolean,
+        inputType: 'toggle'
       },
 
       margin: {

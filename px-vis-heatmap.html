@@ -153,24 +153,26 @@
         show-cell-value="[[showCellValue]]"
         >
       </px-vis-cell-canvas>
-      <px-vis-gridlines
-        svg="[[layer.2]]"
-        axis="[[x]]"
-        margin="[[_internalMargin]]"
-        length="[[_internalHeight]]"
-        orientation="bottom"
-        domain-changed="[[domainChanged]]"
-        offset="[[_gridTranslationX]]">
-      </px-vis-gridlines>
-      <px-vis-gridlines
-        svg="[[layer.2]]"
-        axis="[[y]]"
-        margin="[[_internalMargin]]"
-        length="[[_internalWidth]]"
-        orientation="left"
-        domain-changed="[[domainChanged]]"
-        offset="[[_gridTranslationY]]">
-      </px-vis-gridlines>
+      <template is="dom-if" if="[[!hideGridlines]]" restamp>
+        <px-vis-gridlines
+          svg="[[layer.2]]"
+          axis="[[x]]"
+          margin="[[_internalMargin]]"
+          length="[[_internalHeight]]"
+          orientation="bottom"
+          domain-changed="[[domainChanged]]"
+          offset="[[_gridTranslationX]]">
+        </px-vis-gridlines>
+        <px-vis-gridlines
+          svg="[[layer.2]]"
+          axis="[[y]]"
+          margin="[[_internalMargin]]"
+          length="[[_internalWidth]]"
+          orientation="left"
+          domain-changed="[[domainChanged]]"
+          offset="[[_gridTranslationY]]">
+        </px-vis-gridlines>
+      </template>
       <!-- to use svg, remove canvas-context and add svg="[[svg]]" -->
       <!-- <template is="dom-repeat" items="[[chartData]]">
         <px-vis-heatmap-cell restamp
@@ -526,6 +528,11 @@
 
         tooltipData: {
           type: Object
+        },
+
+        hideGridlines: {
+          type: Boolean,
+          value: false
         },
 
         /**
